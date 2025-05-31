@@ -1,0 +1,11 @@
+html,
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    background: linear-gradient(135deg, #f8f9fc 0%, #eef2f6 100%);
+    color: #2d3748;
+    overflow-x: hidden;
+    scroll-behavior: smooth; 
+}
