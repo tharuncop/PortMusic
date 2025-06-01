@@ -7,7 +7,7 @@ function LandingHero() {
     const router = useRouter();
 
     const handleStartButton = () => {
-      router.push('/dashboard');
+      window.location.href = 'http://localhost:4000/auth/google';
     }
 
     return (

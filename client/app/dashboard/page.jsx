@@ -33,6 +33,12 @@ function Dashboard(){
 
     }, [router]);
 
+    const handleLogout = () => {
+        api.get('/auth/logout').then(()=>{
+            router.push('/');
+        });
+    };
+
     if(loading){
         return <p>Loading...</p>
     }
@@ -41,6 +47,7 @@ function Dashboard(){
         <>
         <h1>Welcome, {user || 'User'}</h1>
         <p>This is your dashboard page</p>
+        <button onClick={handleLogout}>Logout</button>
         </>
     );
 
