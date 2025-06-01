@@ -4,7 +4,7 @@ It is a simple web application that aims in transporting music playlists from on
 
 # CLIENT PORT SETUP
 
--> Although I have used PORT-3001 for client. Beware that NextJS considers PORT-3000 by defualt. So make sure what port your computer is running the client on, and kindly modify the port details while importing via CORS
+-> Although I have used PORT-3001 for client. Beware that NextJS considers PORT-3000 by default. So make sure what port your computer is running the client on, and kindly modify the port details while importing via CORS
 
 # SETUP YOUR GOOGLE OAUTH CREDENTIALS
 
