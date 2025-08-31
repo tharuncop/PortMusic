@@ -1,0 +1,18 @@
+/* global.css or App.css */
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  z-index: 1000;
+  background: white;
+}
+
+/* main area wrapping your routes */
+.main-content {
+  padding-top: 90px;
+  padding-left: 20px;
+  /* same value as navbar height */
+  min-height: calc(100vh - 64px);
+}
