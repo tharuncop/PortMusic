@@ -13,10 +13,10 @@ router.get("/user", (req, res)=>{
 
 // Callback route
 router.get("/google/callback", 
-    passport.authenticate("google", { failureRedirect: "http://localhost:3001" }),
+    passport.authenticate("google", { failureRedirect: "http://localhost:3000" }),
     (req, res) => {
         // Successful login, redirect to frontend dashboard
-        res.redirect("http://localhost:3001/dashboard");
+        res.redirect("http://localhost:3000/dashboard");
     }
 );
 

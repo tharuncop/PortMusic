@@ -1,34 +1,13 @@
-import React, { useEffect, useState } from "react";
+// import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useHistory } from "react-router-dom";
 
-function Dashboard() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+function Dashboard({user}) {
+
   const history = useHistory();
-
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const response = await axios.get("http://localhost:4000/auth/user", { withCredentials: true });
-        setUser(response.data);
-      } catch (err) {
-        console.error("Error fetching user: ", err);
-        history.push('/');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchUser();
-  }, [history]);
-
-  if (loading) return <p>Loading...</p>;
-  if (!user) return null;
 
   const handleLogout = async () => {
     await axios.get("http://localhost:4000/auth/logout", { withCredentials: true });
-    setUser(null);
     history.push("/");
   };
 

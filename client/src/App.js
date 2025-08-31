@@ -5,6 +5,7 @@ import Navbar from "./components/Navbar";
 import LandingPage from "./components/LandingPage";
 import Dashboard from "./components/Dashboard";
 import './App.css';
+import ProtectedRoute from "./components/ProtectedRoute";
 // import NotFound from "./components/NotFound";
 
 function App() {
@@ -14,9 +15,9 @@ function App() {
       <Navbar className = "navbar"/>
       <main className="main-content">
       <Switch>
+        <ProtectedRoute exact path='/dashboard' component={Dashboard}/>
         <Route exact path="/" component={LandingPage} />
-        
-        <Route path="/dashboard" component={Dashboard} />
+
         {/* <Route component={NotFound} /> */}
       </Switch>
       </main>
