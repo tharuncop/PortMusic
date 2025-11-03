@@ -307,6 +307,46 @@ const refreshSpotifyToken = async (userId) => {
     }
 };
 
+// FUNCTION TO REFRESH GOOGLE TOKEN
+const refreshGoogleToken = async (userId) => {
+    console.log('Attempting to refresh Google token for user:', userId);
+
+    try {
+        const user = await User.findById(userId);
+        if(!user || !user.googleRefreshToken){
+            throw new Error('No Google refresh token for user,');
+        }
+
+        const refreshToken = decrypt(user.googleRefreshToken);
+        if(!refreshToken) {
+            throw new Error('Failed to decrypt Google refresh token.');
+        }
+
+        oauth2Client.setCredentials({
+            refresh_token: refreshToken
+        });
+
+        // Now, Exchanging refresh token for an access token
+        const {credentials} = await oauth2Client.refreshAccessToken();
+        const newAccessToken = credentials.access_token;
+
+        await User.findByIdAndUpdate(userId, {
+            googleAccessToken: encrypt(newAccessToken)
+        });
+
+        console.log('Successfully refreshed Google token');
+
+        return newAccessToken;
+
+    } catch (error) {
+        console.error('Error in refreshGoogleToken helper:', error);
+        throw new Error('Google token refresh failed.');
+    }
+
+};
+
+
+
 // API ROUTES FOR PLAYLIST FETCHING
 app.get('/api/spotify/playlists', async(req, res) => {
     if(!req.session.userId){
@@ -422,10 +462,61 @@ app.post('/api/transfer', async (req, res) => {
 
         }).filter(Boolean); //Filter out any nulls
 
-        console.log(`Found ${trackQueries.length} tracks. Firsrt 5:`);
+        console.log(`Found ${trackQueries.length} tracks. First 5:`);
         console.log(trackQueries.slice(0, 5));
 
-        res.json({message: 'Track fetching complete. Ready for Youtube', trackCount: trackQueries.length});
+        // YOUTUBE AUTHENTICATION
+        console.log('Authenticating with Google/Youtube...');
+
+        if(!user.googleAccessToken){
+            return res.status(404).json({error: 'Youtube not connected'});
+        }
+
+        let googleToken = decrypt(user.googleAccessToken);
+        oauth2Client.setCredentials({
+            access_token: googleToken
+        });
+
+        const youtube = google.youtube({version: 'v3', auth: oauth2Client});
+
+
+        try {
+
+            await youtube.channels.list({part: 'id', mine: true});
+            console.log('Google token is valid');
+
+        } catch (error) {
+
+            if(error.response && (error.response.status === 401 || error.response.status === 403)) {
+                console.log('Google Token expired. Refreshing...');
+
+                try {
+
+                    const newGoogleToken = await refreshGoogleToken(userId);
+
+                    oauth2Client.setCredentials({
+                        access_token: newGoogleToken
+                    });
+
+                    console.log('Retrying Youtube API call with new google token');
+                    await youtube.channels.list({part: 'id', mine: true});
+
+                } catch (refreshError){
+                    console.error('Failed to refresh Google token:', refreshError);
+                    return res.status(500).json({error: 'Failed to refresh Googel token'});
+
+                }
+
+            } else {
+                throw error;
+            }
+        }
+
+        console.log('Youtube successfully authenticated. Ready to create playist.');
+
+        // TODO : Create, Search & add tracks to playlist
+
+        res.json({message: 'Youtube Auth complete. Ready for playlist creation.', trackCount: trackQueries.length});
 
 
     } catch (error){
@@ -445,7 +536,6 @@ app.post('/api/logout', (req, res) => {
         res.status(200).json({ message: 'Logged out successfully' });
     });
 });
-
 
 
 app.listen(PORT, ()=>{
