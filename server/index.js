@@ -72,7 +72,8 @@ app.get('/auth/google', (req, res)=>{
     const scopes = [
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/youtube'
+        'https://www.googleapis.com/auth/youtube',
+        'https://www.googleapis.com/auth/youtube.upload'
     ];
     const url = oauth2Client.generateAuthUrl({
         access_type: 'offline',
@@ -156,41 +157,50 @@ app.get('/auth/spotify/callback', async(req, res)=>{
     const code = req.query.code || null;
     const state = req.query.state; // Get the session ID from state parameter
     
-    console.log('Spotify callback - Session userId:', req.session.userId);
-    console.log('Spotify callback - State parameter:', state);
+    console.log('Spotify callback - Current Session ID:', req.sessionID);
+    console.log('Spotify callback - State parameter (original session):', state);
 
-    let userId = req.session.userId;
-
-    // If session is lost, try to recover from state parameter
-    if (!userId && state) {
-        console.log('Attempting to recover session from state...');
-        try {
-            // Get the session from the store using the session ID from state
-            req.sessionStore.get(state, async (err, sessionData) => {
-                if (err) {
-                    console.error('Error retrieving session:', err);
-                    return res.redirect(`${process.env.CLIENT_URL}?error=session_recovery_failed`);
-                }
+    // If we have a state parameter, use THAT session instead of the current one
+    if (state && state !== req.sessionID) {
+        console.log('Session mismatch - restoring original session...');
+        
+        // Get the original session from the store
+        req.sessionStore.get(state, async (err, sessionData) => {
+            if (err) {
+                console.error('Error retrieving original session:', err);
+                return res.redirect(`${process.env.CLIENT_URL}?error=session_recovery_failed`);
+            }
+            
+            if (sessionData && sessionData.userId) {
+                console.log('Original session found, userId:', sessionData.userId);
                 
-                if (sessionData && sessionData.userId) {
-                    console.log('Session recovered from state:', sessionData.userId);
-                    userId = sessionData.userId;
-                    req.session.userId = userId; // Restore the session
+                // Destroy the current (wrong) session
+                req.session.destroy(async (destroyErr) => {
+                    if (destroyErr) {
+                        console.error('Error destroying current session:', destroyErr);
+                    }
                     
-                    // Continue with Spotify token exchange
-                    await exchangeSpotifyToken(code, userId, res);
-                } else {
-                    console.log('No session data found for state:', state);
-                    res.redirect(`${process.env.CLIENT_URL}?error=no_session`);
-                }
-            });
-        } catch (error) {
-            console.error('Session recovery error:', error);
-            res.redirect(`${process.env.CLIENT_URL}?error=session_recovery_failed`);
-        }
-    } else if (userId) {
+                    // Create a new session with the original session data
+                    req.sessionStore.createSession(req, {
+                        ...sessionData,
+                        id: state // Use the original session ID
+                    });
+                    
+                    req.session.userId = sessionData.userId;
+                    req.sessionID = state;
+                    
+                    console.log('Session restored, proceeding with Spotify token exchange...');
+                    await exchangeSpotifyToken(code, sessionData.userId, req, res);
+                });
+            } else {
+                console.log('No session data found for state:', state);
+                res.redirect(`${process.env.CLIENT_URL}?error=no_session`);
+            }
+        });
+    } else if (req.session.userId) {
         // Session is still valid, proceed normally
-        await exchangeSpotifyToken(code, userId, res);
+        console.log('Using current session, userId:', req.session.userId);
+        await exchangeSpotifyToken(code, req.session.userId, req, res);
     } else {
         console.log('No session and no state parameter');
         res.redirect(`${process.env.CLIENT_URL}?error=no_session`);
@@ -198,7 +208,8 @@ app.get('/auth/spotify/callback', async(req, res)=>{
 });
 
 // Helper function for Spotify token exchange
-async function exchangeSpotifyToken(code, userId, res) {
+// Helper function for Spotify token exchange
+async function exchangeSpotifyToken(code, userId, req, res) {
     try {
         const response = await axios({
             method: 'post',
@@ -235,6 +246,7 @@ async function exchangeSpotifyToken(code, userId, res) {
             if (err) {
                 console.error('Final session save error:', err);
             }
+            console.log('Redirecting to client with restored session');
             res.redirect(`${process.env.CLIENT_URL}`);
         });
     } catch(error) {
@@ -465,6 +477,7 @@ app.post('/api/transfer', async (req, res) => {
         console.log(`Found ${trackQueries.length} tracks. First 5:`);
         console.log(trackQueries.slice(0, 5));
 
+
         // YOUTUBE AUTHENTICATION
         console.log('Authenticating with Google/Youtube...');
 
@@ -476,13 +489,24 @@ app.post('/api/transfer', async (req, res) => {
         oauth2Client.setCredentials({
             access_token: googleToken
         });
+        let googleRefreshToken = user.googleRefreshToken ? decrypt(user.googleRefreshToken) : null;
 
-        const youtube = google.youtube({version: 'v3', auth: oauth2Client});
+        const userOAuthClient = new google.auth.OAuth2(
+            process.env.GOOGLE_CLIENT_ID,
+            process.env.GOOGLE_CLIENT_SECRET,
+            process.env.GOOGLE_REDIRECT_URI
+        );
 
+        userOAuthClient.setCredentials({
+            access_token: googleToken,
+            refresh_token: googleRefreshToken
+        });
+
+        let youtube = google.youtube({version: 'v3', auth: userOAuthClient});
 
         try {
 
-            await youtube.channels.list({part: 'id', mine: true});
+            await youtube.channels.list({part: 'snippet', mine: true});
             console.log('Google token is valid');
 
         } catch (error) {
@@ -494,12 +518,16 @@ app.post('/api/transfer', async (req, res) => {
 
                     const newGoogleToken = await refreshGoogleToken(userId);
 
-                    oauth2Client.setCredentials({
-                        access_token: newGoogleToken
+                    userOAuthClient.setCredentials({
+                        access_token: newGoogleToken,
+                        refresh_token: googleRefreshToken
                     });
 
-                    console.log('Retrying Youtube API call with new google token');
-                    await youtube.channels.list({part: 'id', mine: true});
+                    // Re-initializing the youtube object: 
+                    console.log('Re-initializig Youtube service with new token...');
+                    youtube = google.youtube({ version: 'v3', auth: userOAuthClient });
+
+                    console.log('Youtube re-authenticated with new token');
 
                 } catch (refreshError){
                     console.error('Failed to refresh Google token:', refreshError);
@@ -515,12 +543,92 @@ app.post('/api/transfer', async (req, res) => {
         console.log('Youtube successfully authenticated. Ready to create playist.');
 
         // TODO : Create, Search & add tracks to playlist
+        //****** */ CREATING A YOUTUBE PLAYLIST *****
 
-        res.json({message: 'Youtube Auth complete. Ready for playlist creation.', trackCount: trackQueries.length});
+        const playlistTitle = `${playlistName} (from portmusic)`;
+        console.log(`Creating new Youtube playlist: ${playlistTitle}`);
+        const playlistResponse = await youtube.playlists.insert({
+            part: 'snippet,status',
+            requestBody: {
+                snippet: {
+                    title: playlistTitle,
+                    description: `Transferred from spotify playlist "${playlistName}. Created by PortMusic. `,
+                },
+                status: {
+                    privacyStatus: 'private',
+                }
+            },
+        });
 
 
+        const newPlaylistId = playlistResponse.data.id;
+        const newPlaylistUrl = `https://www.youtube.com/playlist?list=${newPlaylistId}`;
+        console.log(`Playlist created! ID: ${newPlaylistId}`);
+
+        // *** SEARCH AND ADD TRACKS *** //
+        console.log('Starting to search and tracks to Youtube playlist...');
+        let addedCount = 0;
+        let failedCount = 0;
+
+        for(const query of trackQueries) {
+            try {
+
+                const searchResponse = await youtube.search.list({
+                    part: 'snippet',
+                    q: query,
+                    type: 'video',
+                    maxResults: 1, // Get only the top result
+                });
+
+                if(searchResponse.data.items.length > 0) {
+
+                    const videoId = searchResponse.data.items[0].id.videoId;
+
+                    // post above response into newly created playlist
+                    await youtube.playlistItems.insert({
+                        part: 'snippet',
+                        requestBody: {
+                            snippet: {
+                                playlistId: newPlaylistId,
+                                resourceId: {
+                                    kind: 'youtube#video',
+                                    videoId: videoId,
+                                },
+                            },
+                        },
+                    });
+                    console.log(`Added: ${query}`);
+                    addedCount++;
+
+                } else {
+                    console.log(`No result found for: ${query}`);
+                    failedCount++;
+                }
+
+            } catch (addError) {
+                console.error(`Failed to add: ${query}`, addError.message);
+            }
+        }
+
+        console.log('--- TRANSFER COMPLETE ---');
+        console.log(`Successfully added: ${addedCount} tracks`);
+        console.log(`Failed to find/add ${failedCount} tracks`);
+        
+
+        // Final success response
+        res.json({
+            message: 'Transfer complete',
+            playlistUrl: newPlaylistUrl,
+            added: addedCount,
+            failed: failedCount,
+        });
+        
     } catch (error){
         console.error('Error in api/transfer route', error.message);
+        if(error.response) {
+            console.error('Youtube API response: ', error.response.data);
+            console.error('Status:', error.response.status);
+        }
         res.status(500).json({error: 'Transfer failed.'});
     }
 
